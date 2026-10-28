@@ -1,0 +1,30 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function isMember() { return signedIn() && exists(/databases/$(database)/documents/members/$(request.auth.uid)); }
+    function isAdmin() { return isMember() && get(/databases/$(database)/documents/members/$(request.auth.uid)).data.admin == true; }
+    function validEntry(d) {
+      return d.keys().hasOnly(['sellerId','seller','customer','ident','desc','startedAt'])
+        && d.customer is string && d.customer.size() > 0 && d.customer.size() <= 100
+        && d.ident is string && d.ident.size() <= 4
+        && d.desc is string && d.desc.size() <= 500
+        && d.seller is string && d.seller.size() <= 60
+        && d.startedAt is number;
+    }
+    // Godkända medarbetare: bara läsning av sitt eget dokument. Skapas av chefen i Firebase-konsolen.
+    match /members/{uid} {
+      allow get: if signedIn() && request.auth.uid == uid;
+      allow list, write: if false;
+    }
+    match /customers/{id} {
+      allow read: if isMember();
+      allow create: if isMember() && request.resource.data.sellerId == request.auth.uid && validEntry(request.resource.data);
+      allow update: if isMember() && resource.data.sellerId == request.auth.uid
+        && request.resource.data.sellerId == request.auth.uid
+        && request.resource.data.startedAt == resource.data.startedAt
+        && validEntry(request.resource.data);
+      allow delete: if isMember() && (resource.data.sellerId == request.auth.uid || isAdmin());
+    }
+  }
+}
